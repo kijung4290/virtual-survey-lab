@@ -9,7 +9,6 @@
 > Synthetic Clients는 실제 이용자를 대신하기 위한 것이 아니라,
 > **실제 이용자에게 더 좋은 질문을 하기 위한** 사전 실험 도구입니다.
 
-[![CI](https://github.com/kijung4290/virtual-survey-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/kijung4290/virtual-survey-lab/actions/workflows/ci.yml)
 ![Next.js](https://img.shields.io/badge/Next.js-15-black)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-blue)
 ![Tests](https://img.shields.io/badge/tests-60%20passing-brightgreen)
@@ -224,6 +223,9 @@ UI는 서비스 레이어를 통해서만 DB·LLM에 접근합니다.
 ```bash
 npm test
 ```
+
+GitHub Actions 워크플로(`.github/workflows/ci.yml`)가 포함되어 있습니다. 푸시하려면 한 번만
+`gh auth refresh -h github.com -s workflow` 로 권한을 추가한 뒤 커밋하세요.
 
 CSV 파싱, 컬럼 매핑, 개인정보 탐지, 설문 검증, LLM 응답 스키마 검증, 비율·척도 계산,
 세그먼트 필터, Synthetic/Actual 차이 계산, 생성 재현성, Gemini 어댑터(요청 형식·오류 처리),

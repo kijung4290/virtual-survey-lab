@@ -19,6 +19,7 @@ const NAV_GROUPS: { label: string; items: { href: string; label: string; hint?: 
     items: [
       { href: '/clients', label: '가상 이용자 패널' },
       { href: '/surveys', label: '설문지' },
+      { href: '/pretest', label: '설문지 사전점검' },
     ],
   },
   {

@@ -5,6 +5,7 @@ import {
   type LLMProvider,
   type LLMRawResult,
   type SurveyPromptInput,
+  type TextPromptInput,
 } from '@/lib/ai/types';
 
 /**
@@ -30,7 +31,20 @@ export class OpenAICompatibleProvider implements LLMProvider {
     return Boolean(process.env.OPENAI_API_KEY);
   }
 
+  async generateText(input: TextPromptInput): Promise<LLMRawResult> {
+    return this.call(input);
+  }
+
   async generateResponse(input: SurveyPromptInput): Promise<LLMRawResult> {
+    return this.call({
+      systemPrompt: input.systemPrompt,
+      userPrompt: buildUserPrompt(input),
+      model: input.model,
+      temperature: input.temperature,
+    });
+  }
+
+  private async call(input: TextPromptInput): Promise<LLMRawResult> {
     const started = Date.now();
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
@@ -50,7 +64,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: input.systemPrompt },
-          { role: 'user', content: buildUserPrompt(input) },
+          { role: 'user', content: input.userPrompt },
         ],
       }),
     });

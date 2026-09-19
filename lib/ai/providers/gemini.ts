@@ -5,6 +5,7 @@ import {
   type LLMProvider,
   type LLMRawResult,
   type SurveyPromptInput,
+  type TextPromptInput,
 } from '@/lib/ai/types';
 
 /**
@@ -75,7 +76,27 @@ export class GeminiProvider implements LLMProvider {
     return Boolean(this.apiKey());
   }
 
+  async generateText(input: TextPromptInput): Promise<LLMRawResult> {
+    return this.call({
+      systemPrompt: input.systemPrompt,
+      userPrompt: input.userPrompt,
+      model: input.model,
+      temperature: input.temperature,
+      maxTokens: input.maxTokens ?? 6000,
+    });
+  }
+
   async generateResponse(input: SurveyPromptInput): Promise<LLMRawResult> {
+    return this.call({
+      systemPrompt: input.systemPrompt,
+      userPrompt: buildUserPrompt(input),
+      model: input.model,
+      temperature: input.temperature,
+      maxTokens: 4000,
+    });
+  }
+
+  private async call(input: TextPromptInput): Promise<LLMRawResult> {
     const started = Date.now();
     const apiKey = this.apiKey();
     if (!apiKey) {
@@ -101,11 +122,11 @@ export class GeminiProvider implements LLMProvider {
       },
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: input.systemPrompt }] },
-        contents: [{ role: 'user', parts: [{ text: buildUserPrompt(input) }] }],
+        contents: [{ role: 'user', parts: [{ text: input.userPrompt }] }],
         generationConfig: {
           temperature: input.temperature,
           responseMimeType: 'application/json',
-          maxOutputTokens: 4000,
+          maxOutputTokens: input.maxTokens ?? 4000,
           ...(useThinkingConfig
             ? { thinkingConfig: { thinkingBudget: thinkingBudget === undefined ? 0 : Number(thinkingBudget) } }
             : {}),

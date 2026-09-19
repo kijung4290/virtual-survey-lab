@@ -54,6 +54,13 @@ export interface SurveyQuestion {
   unit?: string;
   required?: boolean;
   condition?: QuestionCondition;
+  /**
+   * 같은 개념(구성개념)을 재는 문항끼리 묶는 이름.
+   * 예: "참여의향", "사회적 고립감". 신뢰도(α)·문항 변별도 계산 단위가 된다.
+   */
+  construct?: string;
+  /** 역채점 문항 여부(예: "참여할 생각이 없다") */
+  reverse?: boolean;
 }
 
 export const DEFAULT_SCALE_LABELS = [

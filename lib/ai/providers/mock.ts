@@ -91,7 +91,40 @@ function pickWeighted(weights: number[], rand: () => number): number {
   return weights.length - 1;
 }
 
+/** 문항 이해도 점검용 결정적 더미 응답 */
+function mockComprehensionResponse(input: SurveyPromptInput): string {
+  const persona = `${input.personaFields}\n${input.personaSummary}`;
+  const lowDigital = /Digital literacy: (낮음|low)/i.test(persona);
+  const lowEducation = /Education: (무학|초등)/.test(persona);
+
+  const items = input.questions.map((q) => {
+    const seed = hashString(`${input.respondentId}|comp|${q.id}`);
+    const rand = mulberry32(seed);
+
+    // 문항이 길거나 어려운 낱말이 있으면 난이도를 올린다(규칙 기반 근사).
+    const hardWords = ['키오스크', '바우처', '사례관리', '접근성', '리터러시', '모니터링'].filter((w) =>
+      q.question.includes(w)
+    );
+    let difficulty = 2 + (q.question.length > 40 ? 1 : 0) + hardWords.length;
+    if (lowDigital) difficulty += 1;
+    if (lowEducation) difficulty += 1;
+    if (rand() > 0.7) difficulty += 1;
+    difficulty = Math.max(1, Math.min(5, difficulty));
+
+    const restated =
+      difficulty >= 4
+        ? `${q.question.slice(0, 12)}… 무엇을 묻는지 잘 모르겠다. 아마 복지관에서 무엇을 해줄 수 있는지 묻는 것 같다.`
+        : `${q.question.replace(/[?？]/g, '')}는 뜻으로 이해했다.`;
+
+    return { question_id: q.id, restated, difficulty, hard_words: hardWords };
+  });
+
+  return JSON.stringify({ respondent_id: input.respondentId, items }, null, 2);
+}
+
 export function deterministicMockResponse(input: SurveyPromptInput): string {
+  if (input.mode === 'comprehension') return mockComprehensionResponse(input);
+
   const persona = `${input.personaFields}\n${input.personaSummary}`;
   const answers: { question_id: string; value: string | number | string[] }[] = [];
   const picked: Record<string, string | number | string[]> = {};

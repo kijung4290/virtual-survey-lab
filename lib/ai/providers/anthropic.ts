@@ -1,6 +1,13 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { buildUserPrompt } from '@/lib/ai/prompts/surveyPrompt';
-import { ProviderError, RateLimitError, type LLMProvider, type LLMRawResult, type SurveyPromptInput } from '@/lib/ai/types';
+import {
+  ProviderError,
+  RateLimitError,
+  type LLMProvider,
+  type LLMRawResult,
+  type SurveyPromptInput,
+  type TextPromptInput,
+} from '@/lib/ai/types';
 
 /**
  * Anthropic Claude Provider.
@@ -44,7 +51,20 @@ export class AnthropicProvider implements LLMProvider {
     return Boolean(process.env.ANTHROPIC_API_KEY);
   }
 
+  async generateText(input: TextPromptInput): Promise<LLMRawResult> {
+    return this.call(input);
+  }
+
   async generateResponse(input: SurveyPromptInput): Promise<LLMRawResult> {
+    return this.call({
+      systemPrompt: input.systemPrompt,
+      userPrompt: buildUserPrompt(input),
+      model: input.model,
+      temperature: input.temperature,
+    });
+  }
+
+  private async call(input: TextPromptInput): Promise<LLMRawResult> {
     const started = Date.now();
     const client = this.getClient();
     const model = input.model || 'claude-opus-5';
@@ -52,9 +72,9 @@ export class AnthropicProvider implements LLMProvider {
     try {
       const response = await client.messages.create({
         model,
-        max_tokens: 4000,
+        max_tokens: input.maxTokens ?? 4000,
         system: input.systemPrompt,
-        messages: [{ role: 'user', content: buildUserPrompt(input) }],
+        messages: [{ role: 'user', content: input.userPrompt }],
         // 설문 응답은 단순·대량 작업이므로 사고 비용을 낮춘다.
         ...(supportsEffort(model) ? { output_config: { effort: 'low' as const } } : {}),
         ...(supportsTemperature(model) ? { temperature: input.temperature } : {}),

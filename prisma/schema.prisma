@@ -23,6 +23,7 @@ model Project {
   runs           SurveyRun[]
   actualDatasets ActualDataset[]
   comparisons    ComparisonReport[]
+  reviews        SurveyReview[]
   auditLogs      AuditLog[]
 }
 
@@ -106,9 +107,31 @@ model Survey {
   project     Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
   runs        SurveyRun[]
   comparisons ComparisonReport[]
+  reviews     SurveyReview[]
 
   @@index([projectId])
   @@index([lineageId])
+}
+
+/// 설문지 사전점검(문항 표현 검토) 결과
+model SurveyReview {
+  id            String   @id @default(cuid())
+  projectId     String
+  surveyId      String
+  surveyVersion Int      @default(1)
+  /// rule(규칙 기반) | ai(모델 검토)
+  source        String
+  modelProvider String?
+  modelName     String?
+  /// ReviewResult JSON
+  result        String   @default("{}")
+  createdAt     DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  survey  Survey  @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+
+  @@index([surveyId])
+  @@index([projectId])
 }
 
 model SurveyRun {
@@ -130,6 +153,8 @@ model SurveyRun {
   /// 세그먼트 필터 JSON (실행 대상 한정)
   segmentFilter         String  @default("{}")
   repeatIndex           Int     @default(1)
+  /// answer(설문 응답) | comprehension(문항 이해도 점검)
+  mode                  String  @default("answer")
   /// 같은 설정으로 반복 실행한 묶음 키
   batchKey              String?
   concurrency           Int     @default(5)

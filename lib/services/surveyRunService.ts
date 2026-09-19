@@ -2,7 +2,9 @@ import { prisma } from '@/lib/db';
 import { getProvider } from '@/lib/ai';
 import { PROMPT_TEMPLATE_VERSION, DEFAULT_SYSTEM_PROMPT } from '@/lib/ai/prompts/surveyPrompt';
 import { validateLLMResponse } from '@/lib/ai/schemas/response';
-import { RateLimitError } from '@/lib/ai/types';
+import { validateComprehensionResponse } from '@/lib/ai/schemas/comprehension';
+import { COMPREHENSION_SYSTEM_PROMPT, COMPREHENSION_PROMPT_VERSION } from '@/lib/ai/prompts/comprehensionPrompt';
+import { RateLimitError, type RunMode } from '@/lib/ai/types';
 import { buildPersonaFields } from '@/lib/clients/persona';
 import { allClients } from '@/lib/services/clientDatasetService';
 import { getSurvey } from '@/lib/services/surveyService';
@@ -21,6 +23,8 @@ export interface RunConfig {
   provider: string;
   model: string;
   temperature: number;
+  /** answer(설문 응답) | comprehension(문항 이해도 점검). 기본 answer */
+  mode?: RunMode;
   repeat: number;
   concurrency: number;
   /** 분당 최대 호출 수 (0 = 제한 없음). 무료 등급 호출 한도 대응 */
@@ -157,8 +161,12 @@ export async function createRuns(config: RunConfig) {
         modelProvider: config.provider,
         modelName: config.model,
         temperature: config.temperature,
-        systemPrompt: config.systemPrompt?.trim() || DEFAULT_SYSTEM_PROMPT,
-        promptTemplateVersion: PROMPT_TEMPLATE_VERSION,
+        mode: config.mode ?? 'answer',
+        systemPrompt:
+          config.systemPrompt?.trim() ||
+          (config.mode === 'comprehension' ? COMPREHENSION_SYSTEM_PROMPT : DEFAULT_SYSTEM_PROMPT),
+        promptTemplateVersion:
+          config.mode === 'comprehension' ? COMPREHENSION_PROMPT_VERSION : PROMPT_TEMPLATE_VERSION,
         clientDatasetVersion: dataset.version,
         surveyVersion: survey.version,
         segmentFilter: JSON.stringify(config.segmentFilter ?? {}),
@@ -213,7 +221,7 @@ async function processOne(
   responseId: string,
   client: PlainClient,
   questions: SurveyQuestion[],
-  cfg: { provider: string; model: string; temperature: number; systemPrompt: string },
+  cfg: { provider: string; model: string; temperature: number; systemPrompt: string; mode: RunMode },
   throttle: RunThrottle
 ): Promise<{ status: string }> {
   const provider = getProvider(cfg.provider);
@@ -234,6 +242,7 @@ async function processOne(
       await throttle.acquire();
       const result = await provider.generateResponse({
         respondentId: client.localId,
+        mode: cfg.mode,
         personaFields,
         personaSummary: client.personaSummary,
         questions,
@@ -245,7 +254,14 @@ async function processOne(
       rawOutput = result.text;
       latency = result.latencyMs;
 
-      const validation = validateLLMResponse(result.text, questions);
+      const validation =
+        cfg.mode === 'comprehension'
+          ? (() => {
+              const r = validateComprehensionResponse(result.text, questions);
+              return { ok: r.ok, answers: r.items as unknown as Record<string, unknown>, errors: r.errors };
+            })()
+          : validateLLMResponse(result.text, questions);
+
       if (validation.ok) {
         await prisma.surveyResponse.update({
           where: { id: responseId },
@@ -343,6 +359,7 @@ export async function executeRun(runId: string): Promise<void> {
       model: run.modelName,
       temperature: run.temperature,
       systemPrompt: run.systemPrompt,
+      mode: (run.mode as RunMode) ?? 'answer',
     };
 
     // 실행 전체가 공유하는 호출 속도 조절기.

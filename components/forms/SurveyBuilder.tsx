@@ -286,6 +286,33 @@ export function SurveyBuilder({ projectId, survey }: Props) {
                     </fieldset>
                   )}
 
+                  {(q.type === 'scale_5' || q.type === 'number') && (
+                    <div className="grid gap-3 rounded-lg bg-slate-50 px-3 py-3 sm:grid-cols-2">
+                      <Field
+                        label="척도 묶음 (선택)"
+                        htmlFor={`construct-${idx}`}
+                        hint="같은 개념을 재는 문항에 같은 이름을 적으면 신뢰도(α)와 문항 변별도를 계산합니다. 예: 참여의향"
+                      >
+                        <Input
+                          id={`construct-${idx}`}
+                          value={q.construct ?? ''}
+                          onChange={(e) => patch(idx, { construct: e.target.value || undefined })}
+                          placeholder="예: 참여의향"
+                        />
+                      </Field>
+                      <div className="flex items-end">
+                        <label className="flex items-center gap-2 text-sm text-slate-800">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(q.reverse)}
+                            onChange={(e) => patch(idx, { reverse: e.target.checked || undefined })}
+                          />
+                          역채점 문항 (방향이 반대인 문항)
+                        </label>
+                      </div>
+                    </div>
+                  )}
+
                   {q.type === 'number' && (
                     <div className="grid gap-3 sm:grid-cols-3">
                       <Field label="최솟값" htmlFor={`min-${idx}`}>

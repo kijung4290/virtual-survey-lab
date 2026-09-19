@@ -23,6 +23,7 @@ export async function POST(request: Request) {
       label: body.label,
       provider: body.provider || 'mock',
       model: body.model || 'mock-deterministic-v1',
+      mode: body.mode === 'comprehension' ? 'comprehension' : 'answer',
       temperature: body.temperature ?? RUN_DEFAULTS.temperature,
       repeat: Math.max(1, Math.min(10, body.repeat ?? RUN_DEFAULTS.repeat)),
       concurrency: Math.max(1, Math.min(20, body.concurrency ?? RUN_DEFAULTS.concurrency)),

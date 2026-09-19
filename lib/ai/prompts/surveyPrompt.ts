@@ -1,4 +1,5 @@
 import { scaleLabelsOf } from '@/lib/survey/schema';
+import { buildComprehensionPrompt } from '@/lib/ai/prompts/comprehensionPrompt';
 import type { SurveyQuestion } from '@/lib/types';
 import type { SurveyPromptInput } from '@/lib/ai/types';
 
@@ -65,6 +66,9 @@ export function renderQuestion(q: SurveyQuestion, index: number): string {
 }
 
 export function buildUserPrompt(input: SurveyPromptInput): string {
+  // 문항 이해도 점검은 "답을 고르는" 대신 "어떻게 읽었는지"를 묻는다.
+  if (input.mode === 'comprehension') return buildComprehensionPrompt(input);
+
   const questionsBlock = input.questions.map(renderQuestion).join('\n\n');
   const shape = input.questions
     .map((q) => {

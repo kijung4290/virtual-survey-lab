@@ -31,6 +31,8 @@ export const surveyQuestionSchema = z
     unit: z.string().optional(),
     required: z.boolean().optional(),
     condition: questionConditionSchema.optional(),
+    construct: z.string().max(60).optional(),
+    reverse: z.boolean().optional(),
   })
   .superRefine((q, ctx) => {
     if ((q.type === 'single_choice' || q.type === 'multi_choice') && (!q.options || q.options.length < 2)) {
@@ -47,6 +49,12 @@ export const surveyQuestionSchema = z
     }
     if (q.type === 'number' && q.min !== undefined && q.max !== undefined && q.min > q.max) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: `[${q.id}] 최솟값이 최댓값보다 큽니다.` });
+    }
+    if (q.reverse && q.type !== 'scale_5' && q.type !== 'number') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `[${q.id}] 역채점은 척도형·숫자형 문항에만 지정할 수 있습니다.`,
+      });
     }
   });
 

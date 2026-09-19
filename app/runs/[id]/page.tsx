@@ -49,6 +49,7 @@ export default async function RunDetailPage({
               ['데이터셋 버전', `v${run.clientDatasetVersion}`],
               ['반복 회차', `${run.repeatIndex}회차`],
               ['동시 실행 수', String(run.concurrency)],
+              ['분당 최대 호출 수', run.requestsPerMinute > 0 ? `${run.requestsPerMinute}회` : '제한 없음'],
               ['세그먼트 필터', Object.keys(run.segmentFilter).length ? JSON.stringify(run.segmentFilter) : '없음(전체)'],
               ['시작', formatDateTime(run.startedAt)],
               ['완료', formatDateTime(run.completedAt)],

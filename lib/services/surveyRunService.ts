@@ -8,7 +8,9 @@ import { allClients } from '@/lib/services/clientDatasetService';
 import { getSurvey } from '@/lib/services/surveyService';
 import { logAudit } from '@/lib/services/auditService';
 import { safeParseJSON } from '@/lib/utils';
-import type { AnswerMap, PlainClient, SurveyQuestion } from '@/lib/types';
+import { RECOMMENDED_RPM, type AnswerMap, type PlainClient, type SurveyQuestion } from '@/lib/types';
+
+export { RECOMMENDED_RPM };
 
 /** 설문 실행 설정 (PRD 15장) */
 export interface RunConfig {
@@ -21,6 +23,8 @@ export interface RunConfig {
   temperature: number;
   repeat: number;
   concurrency: number;
+  /** 분당 최대 호출 수 (0 = 제한 없음). 무료 등급 호출 한도 대응 */
+  requestsPerMinute?: number;
   /** 대상 인원 상한 (미지정 시 전체) */
   limit?: number;
   /** { field: [허용값...] } 형태의 세그먼트 필터 */
@@ -29,6 +33,65 @@ export interface RunConfig {
 }
 
 export const RUN_DEFAULTS = { temperature: 0.3, repeat: 1, concurrency: 5 };
+
+/** 응답 1건당 호출 한도(429)로 다시 시도하는 최대 횟수 */
+const MAX_RATE_LIMIT_RETRIES = 3;
+
+/**
+ * 호출 속도 조절기.
+ *
+ * - 분당 최대 호출 수를 넘지 않도록 요청 시작 시점을 순서대로 벌린다.
+ * - 한도 오류(429)를 만나면 모든 워커가 함께 쉬도록 일시 정지 시각을 공유한다.
+ *   (워커마다 따로 재시도하면 한도를 더 빨리 소진한다)
+ */
+export class RunThrottle {
+  private minIntervalMs: number;
+  private nextSlot = 0;
+  private pausedUntil = 0;
+
+  /** 한도 오류가 반복되면 이 간격까지 자동으로 느려진다(= 분당 2회) */
+  static readonly MAX_INTERVAL_MS = 30_000;
+
+  constructor(requestsPerMinute: number) {
+    this.minIntervalMs = requestsPerMinute > 0 ? Math.ceil(60_000 / requestsPerMinute) : 0;
+  }
+
+  /**
+   * 한도 오류를 만나면 호출 간격을 늘린다.
+   * 사용자가 정한 값이 실제 한도보다 빠를 때 스스로 맞춰가기 위한 장치.
+   */
+  slowDown() {
+    const base = this.minIntervalMs > 0 ? this.minIntervalMs : 5_000;
+    this.minIntervalMs = Math.min(RunThrottle.MAX_INTERVAL_MS, Math.ceil(base * 1.5));
+    return this.minIntervalMs;
+  }
+
+  get intervalMs() {
+    return this.minIntervalMs;
+  }
+
+  /** 요청을 보내기 직전에 호출한다. 필요한 만큼 기다린 뒤 반환된다. */
+  async acquire(now = Date.now(), sleep = defaultSleep): Promise<number> {
+    const slot = Math.max(now, this.nextSlot, this.pausedUntil);
+    this.nextSlot = slot + this.minIntervalMs;
+    const wait = slot - now;
+    if (wait > 0) await sleep(wait);
+    return wait;
+  }
+
+  /** 한도 오류 발생 시 전체를 잠시 멈춘다. */
+  pause(ms: number, now = Date.now()) {
+    this.pausedUntil = Math.max(this.pausedUntil, now + ms);
+  }
+
+  get pausedUntilMs() {
+    return this.pausedUntil;
+  }
+}
+
+function defaultSleep(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
 
 /** 세그먼트 필터 적용 */
 export function filterClients(clients: PlainClient[], filter?: Record<string, string[]>): PlainClient[] {
@@ -102,6 +165,7 @@ export async function createRuns(config: RunConfig) {
         repeatIndex: i,
         batchKey,
         concurrency: Math.max(1, Math.min(20, config.concurrency)),
+        requestsPerMinute: Math.max(0, Math.min(600, config.requestsPerMinute ?? 0)),
         status: 'PENDING',
         totalCount: targets.length,
       },
@@ -149,7 +213,8 @@ async function processOne(
   responseId: string,
   client: PlainClient,
   questions: SurveyQuestion[],
-  cfg: { provider: string; model: string; temperature: number; systemPrompt: string }
+  cfg: { provider: string; model: string; temperature: number; systemPrompt: string },
+  throttle: RunThrottle
 ): Promise<{ status: string }> {
   const provider = getProvider(cfg.provider);
   const personaFields = buildPersonaFields(client);
@@ -159,11 +224,14 @@ async function processOne(
   let lastError = '';
   let rawOutput = '';
   let latency = 0;
+  // 한도 오류는 형식 오류와 별도로 센다(한 번만 더 시도한다).
+  let rateLimitRetries = 0;
 
   // 최초 1회 + 최대 2회 재시도 (PRD 14장)
   while (attempts < 3) {
     attempts += 1;
     try {
+      await throttle.acquire();
       const result = await provider.generateResponse({
         respondentId: client.localId,
         personaFields,
@@ -197,6 +265,19 @@ async function processOne(
       repairHint = lastError;
     } catch (error) {
       if (error instanceof RateLimitError) {
+        // 모든 워커를 함께 멈춰 한도가 회복될 시간을 준다.
+        const waitMs = Math.min(error.retryAfterMs ?? 30_000, 70_000);
+        throttle.pause(waitMs);
+        // 사용자가 정한 속도가 실제 한도보다 빠르다는 뜻이므로 전체 속도를 낮춘다.
+        throttle.slowDown();
+
+        if (rateLimitRetries < MAX_RATE_LIMIT_RETRIES) {
+          rateLimitRetries += 1;
+          attempts -= 1; // 한도 때문에 못 한 시도는 횟수에서 제외
+          lastError = error.message;
+          continue;
+        }
+
         await prisma.surveyResponse.update({
           where: { id: responseId },
           data: {
@@ -264,6 +345,12 @@ export async function executeRun(runId: string): Promise<void> {
       systemPrompt: run.systemPrompt,
     };
 
+    // 실행 전체가 공유하는 호출 속도 조절기.
+    // 지정하지 않은 실행(과거 기록 포함)은 provider 권장값을 적용해 한도 오류를 예방한다.
+    const effectiveRpm =
+      run.requestsPerMinute > 0 ? run.requestsPerMinute : (RECOMMENDED_RPM[run.modelProvider] ?? 0);
+    const throttle = new RunThrottle(effectiveRpm);
+
     let cursor = 0;
     const workerCount = Math.max(1, Math.min(20, run.concurrency));
 
@@ -297,7 +384,7 @@ export async function executeRun(runId: string): Promise<void> {
           sourceMetadata: {},
         };
 
-        await processOne(runId, item.id, client, survey.questions, cfg);
+        await processOne(runId, item.id, client, survey.questions, cfg, throttle);
 
         // 진행률 갱신
         const [ok, failed] = await Promise.all([

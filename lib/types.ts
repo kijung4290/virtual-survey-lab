@@ -149,5 +149,13 @@ export interface SourceMeta {
   [key: string]: unknown;
 }
 
+/** Provider 별 권장 분당 호출 수 (무료 등급 기준, 0 = 제한 없음) */
+export const RECOMMENDED_RPM: Record<string, number> = {
+  mock: 0,
+  gemini: 12,
+  anthropic: 0,
+  openai: 0,
+};
+
 export const DISCLAIMER =
   '이 결과는 AI와 합성 페르소나를 이용한 사전 시뮬레이션입니다. 실제 이용자·지역주민의 욕구조사를 대체하지 않습니다.';

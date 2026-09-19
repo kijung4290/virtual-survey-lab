@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button, Card, Field, Input, Notice, Select, Textarea } from '@/components/ui';
-import { CLIENT_FIELDS } from '@/lib/types';
+import { CLIENT_FIELDS, RECOMMENDED_RPM } from '@/lib/types';
 import type { ProviderInfo } from '@/lib/ai';
 
 interface Option {
@@ -60,6 +60,7 @@ export function RunLauncher({
   const [temperature, setTemperature] = useState(0.3);
   const [repeat, setRepeat] = useState(1);
   const [concurrency, setConcurrency] = useState(5);
+  const [rpm, setRpm] = useState(RECOMMENDED_RPM[defaultProvider] ?? 0);
   const [limit, setLimit] = useState<string>('');
   const [segmentField, setSegmentField] = useState('');
   const [segmentValues, setSegmentValues] = useState<string[]>([]);
@@ -87,6 +88,8 @@ export function RunLauncher({
     setFetchedModels(null);
     setModelListError(null);
     setTest(null);
+    // Provider 마다 무료 등급 호출 한도가 달라 권장값을 다시 채운다.
+    setRpm(RECOMMENDED_RPM[providerId] ?? 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [providerId]);
 
@@ -206,6 +209,7 @@ export function RunLauncher({
           temperature: Number(temperature),
           repeat: Number(repeat),
           concurrency: Number(concurrency),
+          requestsPerMinute: Number(rpm) || 0,
           limit: limit ? Number(limit) : undefined,
           segmentFilter: segmentFilter(),
           systemPrompt,
@@ -408,6 +412,20 @@ export function RunLauncher({
               onChange={(e) => setConcurrency(Number(e.target.value))}
             />
           </Field>
+          <Field
+            label="분당 최대 호출 수"
+            htmlFor="run-rpm"
+            hint="0 = 제한 없음. Gemini 무료 키는 분당 한도가 낮아 10~15 를 권장합니다."
+          >
+            <Input
+              id="run-rpm"
+              type="number"
+              min={0}
+              max={600}
+              value={rpm}
+              onChange={(e) => setRpm(Number(e.target.value))}
+            />
+          </Field>
         </div>
 
         {provider && !provider.ready && (
@@ -508,6 +526,12 @@ export function RunLauncher({
               <p>
                 설문 실행: <strong>{repeat}회</strong>
               </p>
+              {rpm > 0 && estimate.estimatedCalls > 0 && (
+                <p className="text-slate-600">
+                  분당 {rpm}회 제한 → 예상 소요 시간 약{' '}
+                  <strong>{Math.max(1, Math.ceil(estimate.estimatedCalls / rpm))}분</strong>
+                </p>
+              )}
               <p className="mt-1 text-base">
                 예상 API 호출: <strong>{estimate.estimatedCalls.toLocaleString()}회</strong>
                 {providerId === 'mock' && <span className="ml-2 text-slate-600">(Mock 모드는 비용이 발생하지 않습니다)</span>}

@@ -25,12 +25,18 @@ const INPUT: SurveyPromptInput = {
 };
 
 function mockFetch(status: number, body: unknown) {
-  const spy = vi.fn(async () => ({
-    ok: status >= 200 && status < 300,
-    status,
-    json: async () => body,
-    text: async () => (typeof body === 'string' ? body : JSON.stringify(body)),
-  }));
+  const make = () => {
+    const res = {
+      ok: status >= 200 && status < 300,
+      status,
+      headers: new Headers(),
+      json: async () => body,
+      text: async () => (typeof body === 'string' ? body : JSON.stringify(body)),
+      clone: () => make(),
+    };
+    return res;
+  };
+  const spy = vi.fn(async () => make());
   vi.stubGlobal('fetch', spy);
   return spy;
 }
@@ -164,10 +170,32 @@ describe('GeminiProvider', () => {
     expect(validateLLMResponse(result.text, QUESTIONS).ok).toBe(true);
   });
 
-  it('429 는 호출 한도 오류로 변환한다', async () => {
+  it('429 는 서버가 알려준 시간만큼 기다린 뒤 다시 시도한다', async () => {
     process.env.GEMINI_API_KEY = 'test-key';
-    mockFetch(429, 'quota exceeded');
-    await expect(new GeminiProvider().generateResponse(INPUT)).rejects.toBeInstanceOf(RateLimitError);
+    const spy = mockFetch(429, '{"error":{"code":429},"retryDelay": "2s"}');
+
+    vi.useFakeTimers();
+    const pending = new GeminiProvider().generateResponse(INPUT).catch((e) => e);
+    await vi.advanceTimersByTimeAsync(10_000);
+    const error = await pending;
+    vi.useRealTimers();
+
+    // 최초 1회 + 대기 후 재시도 2회
+    expect(spy).toHaveBeenCalledTimes(3);
+    expect(error).toBeInstanceOf(RateLimitError);
+    expect((error as RateLimitError).retryAfterMs).toBe(2000);
+    expect(String((error as Error).message)).toContain('분당 최대 호출 수');
+  });
+
+  it('대기 시간이 너무 길면 기다리지 않고 바로 재시도 가능한 오류로 넘긴다', async () => {
+    process.env.GEMINI_API_KEY = 'test-key';
+    const spy = mockFetch(429, '{"retryDelay": "600s"}');
+
+    const error = await new GeminiProvider().generateResponse(INPUT).catch((e) => e);
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(error).toBeInstanceOf(RateLimitError);
+    expect((error as RateLimitError).retryAfterMs).toBe(600_000);
   });
 
   it('404 는 모델명 안내 메시지를 준다', async () => {

@@ -26,6 +26,7 @@ export async function POST(request: Request) {
       temperature: body.temperature ?? RUN_DEFAULTS.temperature,
       repeat: Math.max(1, Math.min(10, body.repeat ?? RUN_DEFAULTS.repeat)),
       concurrency: Math.max(1, Math.min(20, body.concurrency ?? RUN_DEFAULTS.concurrency)),
+      requestsPerMinute: Math.max(0, Math.min(600, body.requestsPerMinute ?? 0)),
       limit: body.limit,
       segmentFilter: body.segmentFilter,
       systemPrompt: body.systemPrompt,

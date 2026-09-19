@@ -110,6 +110,20 @@ export function RunProgress({ runId, projectId }: { runId: string; projectId: st
 
       {progress.errorMessage && <Notice tone="danger" title="실행 오류">{progress.errorMessage}</Notice>}
 
+      {(progress.byStatus.RATE_LIMITED ?? 0) > 0 && !running && (
+        <Notice tone="warning" title="호출 한도로 남은 응답이 있습니다">
+          <p>
+            {progress.byStatus.RATE_LIMITED}건이 AI 호출 한도(분당·일일)에 걸려 처리되지 않았습니다. 이미 받은 응답은
+            그대로 보존됩니다.
+          </p>
+          <p className="mt-1">
+            잠시 기다린 뒤 아래 <strong>&ldquo;실패·미완료 다시 실행&rdquo;</strong> 을 누르면 남은 건만 이어서
+            진행합니다. 계속 반복되면 실행 화면에서 <strong>분당 최대 호출 수</strong>를 10 이하로, 동시 실행 수를 2~3
+            으로 낮춰보세요.
+          </p>
+        </Notice>
+      )}
+
       <div className="flex flex-wrap gap-2">
         <Button onClick={() => void resume()} disabled={busy || running || retryable === 0}>
           {busy ? '재실행 중…' : `실패·미완료 ${retryable}건 다시 실행`}

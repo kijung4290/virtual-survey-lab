@@ -31,9 +31,13 @@ export interface LLMProvider {
 }
 
 export class RateLimitError extends Error {
-  constructor(message: string) {
+  /** 서버가 알려준 재시도 대기 시간(ms). 모르면 undefined */
+  readonly retryAfterMs?: number;
+
+  constructor(message: string, retryAfterMs?: number) {
     super(message);
     this.name = 'RateLimitError';
+    this.retryAfterMs = retryAfterMs;
   }
 }
 

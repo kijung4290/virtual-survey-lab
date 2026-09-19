@@ -133,6 +133,8 @@ model SurveyRun {
   /// 같은 설정으로 반복 실행한 묶음 키
   batchKey              String?
   concurrency           Int     @default(5)
+  /// 분당 최대 호출 수(0 = 제한 없음). 무료 등급 한도 대응용
+  requestsPerMinute     Int     @default(0)
 
   /// PENDING | RUNNING | SUCCESS | FAILED | CANCELLED
   status         String    @default("PENDING")

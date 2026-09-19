@@ -22,6 +22,11 @@ import {
  * 기본 후보 목록. 계정·시점에 따라 사용 가능한 모델이 다르므로
  * 실행 화면의 "사용 가능한 모델 목록 불러오기" 로 실제 목록을 확인하는 것이 정확하다.
  */
+/** 429 를 만났을 때 provider 내부에서 기다렸다가 다시 시도하는 횟수 */
+const GEMINI_RATE_LIMIT_RETRIES = 2;
+/** 한 번에 기다릴 수 있는 최대 시간(이보다 길면 배치 쪽에 넘겨 나중에 재개한다) */
+const GEMINI_MAX_WAIT_MS = 65_000;
+
 export const GEMINI_MODELS = [
   'gemini-3.5-flash',
   'gemini-3.7-flash',
@@ -30,6 +35,23 @@ export const GEMINI_MODELS = [
   'gemini-2.5-pro',
   'gemini-2.0-flash',
 ];
+
+/**
+ * 429/503 응답에서 재시도 대기 시간을 읽는다.
+ * Gemini 는 본문의 RetryInfo(`"retryDelay": "31s"`)나 Retry-After 헤더로 알려준다.
+ */
+export function parseRetryDelayMs(body: string, headers?: Headers): number | undefined {
+  const header = headers?.get('retry-after');
+  if (header) {
+    const seconds = Number(header);
+    if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+  }
+
+  const match = body.match(/"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/);
+  if (match) return Math.round(Number(match[1]) * 1000);
+
+  return undefined;
+}
 
 interface GeminiResponse {
   candidates?: {
@@ -105,8 +127,24 @@ export class GeminiProvider implements LLMProvider {
       );
     }
 
+    // 429(호출 한도)는 서버가 알려준 시간만큼 기다렸다가 다시 시도한다.
+    // 무료 등급은 분당 호출 수 제한이 낮아 대기 후 재시도하면 대부분 성공한다.
+    for (let attempt = 1; attempt <= GEMINI_RATE_LIMIT_RETRIES && res.status === 429; attempt++) {
+      const body = await res.clone().text();
+      const delay = parseRetryDelayMs(body, res.headers) ?? attempt * 20_000;
+      if (delay > GEMINI_MAX_WAIT_MS) break;
+      await new Promise((r) => setTimeout(r, delay));
+      res = await fetch(url, request);
+    }
+
     if (res.status === 429) {
-      throw new RateLimitError('Gemini API 호출 한도에 도달했습니다. 최대 동시 실행 수를 줄여보세요.');
+      const body = await res.text();
+      const retryAfterMs = parseRetryDelayMs(body, res.headers);
+      const waitHint = retryAfterMs ? ` 약 ${Math.ceil(retryAfterMs / 1000)}초 뒤에 다시 시도할 수 있습니다.` : '';
+      throw new RateLimitError(
+        `Gemini 호출 한도(분당/일일)에 도달했습니다.${waitHint} 실행 화면에서 "분당 최대 호출 수"를 낮추거나 동시 실행 수를 줄여보세요.`,
+        retryAfterMs
+      );
     }
 
     if (!res.ok) {

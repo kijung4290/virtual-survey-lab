@@ -1,0 +1,252 @@
+// Synthetic Client Survey Lab - Prisma schema (v1: SQLite local-first)
+// 주의: 이 DB 에는 실제 개인 식별정보를 저장하지 않습니다.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Project {
+  id               String   @id @default(cuid())
+  name             String
+  description      String?
+  targetPopulation String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  datasets       ClientDataset[]
+  surveys        Survey[]
+  runs           SurveyRun[]
+  actualDatasets ActualDataset[]
+  comparisons    ComparisonReport[]
+  auditLogs      AuditLog[]
+}
+
+/// Synthetic Client 묶음. 수정 시 새 버전을 만들어 기존 Run 결과가 변하지 않게 한다.
+model ClientDataset {
+  id          String   @id @default(cuid())
+  projectId   String
+  name        String
+  version     Int      @default(1)
+  description String?
+  /// { base_source, welfare_distribution_source, generation_method, notes }
+  sourceMeta  String   @default("{}")
+  clientCount Int      @default(0)
+  locked      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  project Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  clients SyntheticClient[]
+  runs    SurveyRun[]
+
+  @@index([projectId])
+}
+
+model SyntheticClient {
+  id        String @id @default(cuid())
+  datasetId String
+  projectId String
+  /// 사람이 읽는 식별자 (예: SC-0001). 실제 개인과 무관한 일련번호.
+  localId   String
+
+  age               Int?
+  sex               String?
+  province          String?
+  district          String?
+  householdType     String?
+  maritalStatus     String?
+  housingType       String?
+  educationLevel    String?
+  employmentStatus  String?
+  economicStatus    String?
+  healthStatus      String?
+  mobilityDifficulty String?
+  digitalLiteracy   String?
+  socialContactLevel String?
+  careNeed          String?
+  /// JSON 문자열 배열
+  currentServiceUse String @default("[]")
+
+  /// 사용자 정의 필드 JSON
+  attributes     String @default("{}")
+  personaSummary String @default("")
+
+  /// imported | generated | manual
+  sourceType     String @default("imported")
+  sourceMetadata String @default("{}")
+
+  createdAt DateTime @default(now())
+
+  dataset   ClientDataset    @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  responses SurveyResponse[]
+
+  @@index([datasetId])
+  @@index([projectId])
+}
+
+/// 설문지. 수정 시 새 버전 레코드를 만든다(응답은 실행 당시 버전을 유지).
+model Survey {
+  id          String   @id @default(cuid())
+  projectId   String
+  name        String
+  description String?
+  version     Int      @default(1)
+  /// 같은 계보(버전 체인)를 묶는 키
+  lineageId   String
+  /// SurveyQuestion[] JSON
+  questions   String   @default("[]")
+  locked      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project     Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  runs        SurveyRun[]
+  comparisons ComparisonReport[]
+
+  @@index([projectId])
+  @@index([lineageId])
+}
+
+model SurveyRun {
+  id        String @id @default(cuid())
+  projectId String
+  surveyId  String
+  datasetId String
+
+  label                 String?
+  modelProvider         String
+  modelName             String
+  modelVersion          String?
+  temperature           Float   @default(0.3)
+  systemPrompt          String
+  promptTemplateVersion String  @default("v1")
+  /// 실행 당시 데이터셋 버전 스냅샷
+  clientDatasetVersion  Int     @default(1)
+  surveyVersion         Int     @default(1)
+  /// 세그먼트 필터 JSON (실행 대상 한정)
+  segmentFilter         String  @default("{}")
+  repeatIndex           Int     @default(1)
+  /// 같은 설정으로 반복 실행한 묶음 키
+  batchKey              String?
+  concurrency           Int     @default(5)
+
+  /// PENDING | RUNNING | SUCCESS | FAILED | CANCELLED
+  status         String    @default("PENDING")
+  totalCount     Int       @default(0)
+  completedCount Int       @default(0)
+  failedCount    Int       @default(0)
+  errorMessage   String?
+  startedAt      DateTime  @default(now())
+  completedAt    DateTime?
+
+  project     Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  survey      Survey             @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+  dataset     ClientDataset      @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  responses   SurveyResponse[]
+  comparisons ComparisonReport[]
+
+  @@index([projectId])
+  @@index([surveyId])
+  @@index([batchKey])
+}
+
+model SurveyResponse {
+  id       String @id @default(cuid())
+  runId    String
+  clientId String
+
+  /// PENDING | RUNNING | SUCCESS | FAILED | INVALID_RESPONSE | RATE_LIMITED
+  status       String @default("PENDING")
+  /// { "Q1": "병원동행", "Q2": 5, ... } JSON
+  answers      String @default("{}")
+  rawOutput    String?
+  errorMessage String?
+  attempts     Int    @default(0)
+  latencyMs    Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  run    SurveyRun       @relation(fields: [runId], references: [id], onDelete: Cascade)
+  client SyntheticClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, clientId])
+  @@index([runId])
+  @@index([status])
+}
+
+/// 실제(사람) 설문 결과. 익명화된 데이터만 허용하며 외부 LLM 으로 전송하지 않는다.
+model ActualDataset {
+  id          String   @id @default(cuid())
+  projectId   String
+  name        String
+  surveyDate  String?
+  rowCount    Int      @default(0)
+  /// 업로드 CSV 의 컬럼 → 문항 ID 매핑 JSON
+  columnMap   String   @default("{}")
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  project     Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  responses   ActualResponse[]
+  comparisons ComparisonReport[]
+
+  @@index([projectId])
+}
+
+model ActualResponse {
+  id           String @id @default(cuid())
+  datasetId    String
+  respondentId String
+  /// { "Q1": "...", "Q2": 4 } JSON
+  answers      String @default("{}")
+
+  dataset ActualDataset @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+
+  @@index([datasetId])
+}
+
+model ComparisonReport {
+  id              String   @id @default(cuid())
+  projectId       String
+  surveyId        String
+  runId           String
+  actualDatasetId String
+  title           String
+  /// 계산된 비교 결과 JSON
+  result          String   @default("{}")
+  /// 규칙 기반 해석 문구
+  narrative       String   @default("")
+  createdAt       DateTime @default(now())
+
+  project       Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  survey        Survey        @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+  run           SurveyRun     @relation(fields: [runId], references: [id], onDelete: Cascade)
+  actualDataset ActualDataset @relation(fields: [actualDatasetId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  projectId String?
+  action    String
+  detail    String   @default("{}")
+  createdAt DateTime @default(now())
+
+  project Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([createdAt])
+}
+
+/// 앱 설정(기본 provider/model 등). API Key 는 절대 저장하지 않는다.
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}

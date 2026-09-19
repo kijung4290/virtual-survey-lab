@@ -1,0 +1,66 @@
+@import 'tailwindcss';
+
+/*
+ * Synthetic Client Survey Lab
+ * 대상 사용자는 개발자가 아닌 사회복지기관 실무자다.
+ * - 흰색 기반의 단순한 화면
+ * - 기본 글자 크기 16px 이상
+ * - 색상만으로 결과를 구분하지 않는다(표 + 라벨 병기)
+ */
+
+:root {
+  --background: #ffffff;
+  --foreground: #111827;
+  --muted: #f8fafc;
+  --border: #e2e8f0;
+}
+
+html {
+  font-size: 16px;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family:
+    'Pretendard',
+    -apple-system,
+    BlinkMacSystemFont,
+    'Malgun Gothic',
+    '맑은 고딕',
+    system-ui,
+    sans-serif;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 키보드 탐색이 항상 보이도록 */
+:focus-visible {
+  outline: 3px solid #1d4ed8;
+  outline-offset: 2px;
+}
+
+/* 표 기본 스타일 */
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+/* 스크린리더 전용 텍스트 */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+}

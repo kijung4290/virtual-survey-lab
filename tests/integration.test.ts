@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { prisma } from '@/lib/db';
 import { createProject } from '@/lib/services/projectService';
-import { createDataset, allClients } from '@/lib/services/clientDatasetService';
+import { createDataset, allClients, datasetFieldValues } from '@/lib/services/clientDatasetService';
 import { createSurvey, createSurveyVersion } from '@/lib/services/surveyService';
 import { createRuns, executeRun, loadRunResponses, resumeRun } from '@/lib/services/surveyRunService';
 import { analyzeRun, analyzeStability } from '@/lib/services/analysisService';
@@ -68,6 +68,15 @@ describe('전체 파이프라인 (Mock Provider)', () => {
       clients: clients.slice(0, 2),
     });
     expect(v2.version).toBe(2);
+
+    // 세그먼트 필터 UI 가 쓰는 "실제 존재하는 값" 목록
+    const householdValues = await datasetFieldValues(dataset.id, 'householdType');
+    expect(householdValues.map((v) => v.value).sort()).toEqual(['독거', '부부']);
+    expect(householdValues.reduce((a, v) => a + v.count, 0)).toBe(5);
+
+    const ageValues = await datasetFieldValues(dataset.id, 'age');
+    expect(ageValues.every((v) => /^\d+([-+]\d*)?$/.test(v.value))).toBe(true);
+    expect(await datasetFieldValues(dataset.id, 'careNeed')).toEqual([]);
 
     // 3) 설문 생성
     const survey = await createSurvey({

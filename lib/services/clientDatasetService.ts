@@ -2,7 +2,7 @@ import { prisma } from '@/lib/db';
 import { logAudit } from '@/lib/services/auditService';
 import { safeParseJSON } from '@/lib/utils';
 import type { ClientDraft } from '@/lib/clients/mapping';
-import type { PlainClient, SourceMeta } from '@/lib/types';
+import { AGE_BANDS, type PlainClient, type SourceMeta } from '@/lib/types';
 
 /** DB row → 앱에서 쓰는 PlainClient */
 export function toPlainClient(row: {
@@ -217,4 +217,43 @@ export async function datasetProfile(datasetId: string) {
     ageMean: ages.length ? Number((ages.reduce((a, b) => a + b, 0) / ages.length).toFixed(1)) : null,
     profile,
   };
+}
+
+export interface FieldValueOption {
+  /** 세그먼트 필터에 쓰는 값 (연령은 "65-74" 형태) */
+  value: string;
+  /** 화면에 보여줄 라벨 */
+  label: string;
+  count: number;
+}
+
+/**
+ * 데이터셋에 실제로 들어 있는 속성 값 목록.
+ * 세그먼트 필터에서 사용자가 값을 직접 타이핑하지 않도록 실제 값만 보여준다.
+ */
+export async function datasetFieldValues(datasetId: string, field: string): Promise<FieldValueOption[]> {
+  const clients = await allClients(datasetId);
+
+  if (field === 'age') {
+    return AGE_BANDS.map((band) => {
+      const count = clients.filter((c) => c.age !== null && c.age >= band.min && c.age <= band.max).length;
+      const value = band.max >= 200 ? `${band.min}+` : `${band.min}-${band.max}`;
+      return { value, label: band.label, count };
+    }).filter((b) => b.count > 0);
+  }
+
+  const counts = new Map<string, number>();
+  for (const c of clients) {
+    const raw = (c as unknown as Record<string, unknown>)[field];
+    if (raw === null || raw === undefined || raw === '') continue;
+    const values = Array.isArray(raw) ? raw : [raw];
+    for (const v of values) {
+      const key = String(v);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+  }
+
+  return [...counts.entries()]
+    .map(([value, count]) => ({ value, label: value, count }))
+    .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
 }

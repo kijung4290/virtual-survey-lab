@@ -62,7 +62,9 @@ export function RunLauncher({
   const [concurrency, setConcurrency] = useState(5);
   const [limit, setLimit] = useState<string>('');
   const [segmentField, setSegmentField] = useState('');
-  const [segmentValues, setSegmentValues] = useState('');
+  const [segmentValues, setSegmentValues] = useState<string[]>([]);
+  const [fieldValues, setFieldValues] = useState<{ value: string; label: string; count: number }[]>([]);
+  const [loadingValues, setLoadingValues] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState(defaultSystemPrompt);
   const [showPrompt, setShowPrompt] = useState(false);
 
@@ -88,11 +90,37 @@ export function RunLauncher({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [providerId]);
 
+  // 세그먼트 속성을 고르면 데이터셋에 실제로 있는 값만 불러온다(직접 입력하다 오타 나는 것을 막는다).
+  useEffect(() => {
+    setSegmentValues([]);
+    setFieldValues([]);
+    if (!segmentField || !datasetId) return;
+
+    let cancelled = false;
+    setLoadingValues(true);
+    fetch(`/api/datasets/${datasetId}/values?field=${segmentField}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled && Array.isArray(data.values)) setFieldValues(data.values);
+      })
+      .catch(() => {
+        if (!cancelled) setFieldValues([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingValues(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [segmentField, datasetId]);
+
   // 설정이 바뀌면 실행 확인을 다시 받는다.
   useEffect(() => {
     setConfirmed(false);
     setEstimate(null);
-  }, [surveyId, datasetId, providerId, model, repeat, limit, segmentField, segmentValues]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [surveyId, datasetId, providerId, model, repeat, limit, segmentField, segmentValues.join(',')]);
 
   const modelOptions = fetchedModels && fetchedModels.length > 0 ? fetchedModels : (provider?.models ?? []);
 
@@ -130,13 +158,8 @@ export function RunLauncher({
   };
 
   const segmentFilter = () => {
-    if (!segmentField || !segmentValues.trim()) return undefined;
-    return {
-      [segmentField]: segmentValues
-        .split(',')
-        .map((v) => v.trim())
-        .filter(Boolean),
-    };
+    if (!segmentField || segmentValues.length === 0) return undefined;
+    return { [segmentField]: segmentValues };
   };
 
   const runEstimate = async () => {
@@ -235,14 +258,14 @@ export function RunLauncher({
         </div>
       </Card>
 
-      <Card title="2단계 · 대상 좁히기 (선택)" description="전체 패널 대신 특정 세그먼트에만 실행할 수 있습니다.">
-        <div className="grid gap-4 md:grid-cols-3">
-          <Field label="대상 인원 상한" htmlFor="run-limit" hint="비워두면 전체">
+      <Card title="2단계 · 대상 좁히기 (선택)" description="비워두면 패널 전체에 실행합니다.">
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label="대상 인원 상한" htmlFor="run-limit" hint="비워두면 전체. 처음에는 5~10명으로 시험해보세요.">
             <Input id="run-limit" type="number" min={1} value={limit} onChange={(e) => setLimit(e.target.value)} />
           </Field>
-          <Field label="세그먼트 속성" htmlFor="run-segfield">
+          <Field label="세그먼트 속성" htmlFor="run-segfield" hint="특정 집단에만 실행하려면 선택하세요.">
             <Select id="run-segfield" value={segmentField} onChange={(e) => setSegmentField(e.target.value)}>
-              <option value="">사용 안 함</option>
+              <option value="">사용 안 함 (전체)</option>
               {CLIENT_FIELDS.map((f) => (
                 <option key={f.key} value={f.key}>
                   {f.label}
@@ -250,19 +273,56 @@ export function RunLauncher({
               ))}
             </Select>
           </Field>
-          <Field
-            label="포함할 값"
-            htmlFor="run-segvalues"
-            hint={segmentField === 'age' ? '예: 75-84, 85+' : '쉼표로 구분. 예: 독거, 부부'}
-          >
-            <Input
-              id="run-segvalues"
-              value={segmentValues}
-              onChange={(e) => setSegmentValues(e.target.value)}
-              disabled={!segmentField}
-            />
-          </Field>
         </div>
+
+        {segmentField && (
+          <fieldset className="mt-4 rounded-lg border border-slate-200 px-4 py-3">
+            <legend className="px-1 text-sm font-medium text-slate-800">
+              포함할 값 {segmentValues.length > 0 && `(${segmentValues.length}개 선택)`}
+            </legend>
+
+            {loadingValues ? (
+              <p className="text-sm text-slate-600">값 목록을 불러오는 중…</p>
+            ) : fieldValues.length === 0 ? (
+              <p className="text-sm text-amber-800">
+                이 데이터셋에는 해당 속성 값이 없습니다. 다른 속성을 고르거나 &ldquo;사용 안 함&rdquo;으로 두세요.
+              </p>
+            ) : (
+              <>
+                <div className="flex flex-wrap gap-2">
+                  {fieldValues.map((v) => {
+                    const checked = segmentValues.includes(v.value);
+                    return (
+                      <label
+                        key={v.value}
+                        className={
+                          'flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm ' +
+                          (checked ? 'border-blue-400 bg-blue-50 text-blue-900' : 'border-slate-300 bg-white')
+                        }
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) =>
+                            setSegmentValues((prev) =>
+                              e.target.checked ? [...prev, v.value] : prev.filter((x) => x !== v.value)
+                            )
+                          }
+                        />
+                        <span>
+                          {v.label} <span className="text-slate-500">({v.count}명)</span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+                <p className="mt-2 text-xs text-slate-500">
+                  데이터셋에 실제로 있는 값만 표시합니다. 아무것도 고르지 않으면 전체가 대상입니다.
+                </p>
+              </>
+            )}
+          </fieldset>
+        )}
       </Card>
 
       <Card title="3단계 · AI 설정">
@@ -453,25 +513,34 @@ export function RunLauncher({
                 {providerId === 'mock' && <span className="ml-2 text-slate-600">(Mock 모드는 비용이 발생하지 않습니다)</span>}
               </p>
 
-              <label className="mt-3 flex items-start gap-2">
-                <input
-                  type="checkbox"
-                  checked={confirmed}
-                  onChange={(e) => setConfirmed(e.target.checked)}
-                  className="mt-1"
-                />
-                <span>
-                  위 호출 수를 확인했고 실행에 동의합니다.
-                  {providerId !== 'mock' && ' 실제 API 비용이 발생할 수 있습니다.'}
-                </span>
-              </label>
+              {estimate.targetCount === 0 ? (
+                <p className="mt-3 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-900">
+                  조건에 맞는 대상자가 <strong>0명</strong>입니다. 위 2단계에서 세그먼트 값을 다시 고르거나
+                  &ldquo;사용 안 함&rdquo;으로 바꿔주세요.
+                </p>
+              ) : (
+                <label className="mt-3 flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    checked={confirmed}
+                    onChange={(e) => setConfirmed(e.target.checked)}
+                    className="mt-1"
+                  />
+                  <span>
+                    위 호출 수를 확인했고 실행에 동의합니다.
+                    {providerId !== 'mock' && ' 실제 API 비용이 발생할 수 있습니다.'}
+                  </span>
+                </label>
+              )}
             </div>
           )}
 
           <Button
             variant="primary"
             onClick={() => void start()}
-            disabled={busy || !estimate || !confirmed || !provider?.ready || !model.trim()}
+            disabled={
+              busy || !estimate || estimate.targetCount === 0 || !confirmed || !provider?.ready || !model.trim()
+            }
           >
             {busy ? '시작하는 중…' : '설문 실행 시작'}
           </Button>
